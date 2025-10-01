@@ -12,6 +12,8 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use sysinfo::{System, Process, ProcessesToUpdate};
+#[cfg(feature = "gpu")]
+use nvml_wrapper::Nvml;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -25,15 +27,20 @@ async fn main() -> std::io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut sys = System::new_all();
-    // Initial refresh to get CPU info
-    sys.refresh_cpu_all();
+    // Initial refresh to get system info
+    sys.refresh_all();
 
     // Get CPU model (assume first CPU for model name, as it's typically the same for all cores)
     let cpu_model = sys.cpus().first().map_or("Unknown".to_string(), |cpu| cpu.brand().to_string());
 
+    // Initialize NVML for GPU monitoring (if enabled)
+    #[cfg(feature = "gpu")]
+    let nvml = Nvml::init().ok(); // Handle initialization failure gracefully
+
     loop {
         // Refresh system information
-        sys.refresh_cpu_all();
+        sys.refresh_all(); // Refreshes CPU, memory, and processes
+        sys.refresh_cpu_all(); // Specific refresh for CPU usage
         sys.refresh_processes(ProcessesToUpdate::All);
 
         // Draw UI
@@ -42,11 +49,11 @@ async fn main() -> std::io::Result<()> {
 
             // Layout: Vertical split for system info and process table
             let chunks = Layout::default()
-                .constraints([Constraint::Length(4), Constraint::Min(0)])
+                .constraints([Constraint::Length(6), Constraint::Min(0)]) // Increased height for more info
                 .split(size);
 
-            // System information (CPU model and usage)
-            let system_text = vec![
+            // System information (CPU model, usage, RAM, and GPU)
+            let mut system_text = vec![
                 Line::from(Span::styled(
                     format!("CPU Model: {}", cpu_model),
                     Style::default().fg(Color::Green),
@@ -55,7 +62,51 @@ async fn main() -> std::io::Result<()> {
                     format!("Total CPU Usage: {:.2}%", sys.global_cpu_usage()),
                     Style::default().fg(Color::Yellow),
                 )),
+                Line::from(Span::styled(
+                    format!(
+                        "RAM: {}/{} MB ({:.2}%)",
+                        sys.used_memory() / 1024, // Convert KB to MB
+                        sys.total_memory() / 1024,
+                        (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0
+                    ),
+                    Style::default().fg(Color::Blue),
+                )),
             ];
+
+            // Add GPU information if NVML is enabled and initialized
+            #[cfg(feature = "gpu")]
+            if let Some(nvml) = &nvml {
+                if let Ok(device) = nvml.device_by_index(0) {
+                    if let Ok(utilization) = device.utilization_rates() {
+                        system_text.push(Line::from(Span::styled(
+                            format!("GPU Utilization: {}%", utilization.gpu),
+                            Style::default().fg(Color::Magenta),
+                        )));
+                        if let Ok(memory) = device.memory_info() {
+                            system_text.push(Line::from(Span::styled(
+                                format!(
+                                    "GPU Memory: {}/{} MB ({:.2}%)",
+                                    memory.used / 1024 / 1024, // Convert bytes to MB
+                                    memory.total / 1024 / 1024,
+                                    (memory.used as f64 / memory.total as f64) * 100.0
+                                ),
+                                Style::default().fg(Color::Magenta),
+                            )));
+                        }
+                    }
+                } else {
+                    system_text.push(Line::from(Span::styled(
+                        "GPU: Not detected".to_string(),
+                        Style::default().fg(Color::Red),
+                    )));
+                }
+            }
+            #[cfg(not(feature = "gpu"))]
+            system_text.push(Line::from(Span::styled(
+                "GPU: Monitoring disabled".to_string(),
+                Style::default().fg(Color::Red),
+            )));
+
             let system_block = Block::default()
                 .title("System")
                 .borders(Borders::ALL)

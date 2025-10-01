@@ -1,10 +1,18 @@
 [package]
 name = "TaskManager_lite_test"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 sysinfo = "0.31"
 tokio = { version = "1.40", features = ["rt-multi-thread", "time", "macros"] }
 ratatui = "0.28"
 crossterm = "0.28"
+
+[dependencies.nvml-wrapper]
+version = "0.10"
+optional = true
+
+[features]
+default = []
+gpu = ["nvml-wrapper"]
