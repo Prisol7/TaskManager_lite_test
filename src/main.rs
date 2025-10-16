@@ -26,7 +26,7 @@ enum SortBy {
     Pid,
 }
 
-// Shared data structures
+
 #[derive(Clone)]
 struct ProcessInfo {
     name: String,
@@ -80,7 +80,6 @@ fn bytes_per_sec_human(bps: f64) -> String {
 }
 
 fn main() -> std::io::Result<()> {
-    // Initialize shared state
     let shared_state = Arc::new(Mutex::new(SharedState {
         processes: Vec::new(),
         cpu_model: String::new(),
@@ -99,12 +98,10 @@ fn main() -> std::io::Result<()> {
     let state_for_process = Arc::clone(&shared_state);
     let state_for_network = Arc::clone(&shared_state);
 
-    // Thread 1: Process monitoring (updates every 1 second)
+    // Thread 1: Process monitoring 
     thread::spawn(move || {
         let mut sys = System::new_all();
         sys.refresh_all();
-        
-        // Get CPU model once
         let cpu_model = sys
             .cpus()
             .first()
@@ -115,7 +112,7 @@ fn main() -> std::io::Result<()> {
         let mut last_tick = Instant::now();
 
         loop {
-            // Check if paused
+            //heck if paused
             let is_paused = if let Ok(state) = state_for_process.lock() {
                 state.paused
             } else {
@@ -147,7 +144,6 @@ fn main() -> std::io::Result<()> {
                 last_proc_read_total = proc_read_total;
                 last_proc_write_total = proc_write_total;
 
-                // Collect process information
                 let processes: Vec<ProcessInfo> = sys
                     .processes()
                     .values()
@@ -161,7 +157,6 @@ fn main() -> std::io::Result<()> {
                     })
                     .collect();
 
-                // Update shared state
                 if let Ok(mut state) = state_for_process.lock() {
                     state.processes = processes;
                     state.cpu_model = cpu_model.clone();
@@ -182,7 +177,7 @@ fn main() -> std::io::Result<()> {
         }
     });
 
-    // Thread 2: Network monitoring (updates every 1 second)
+    // Thread 2: Network monitoring
     thread::spawn(move || {
         let mut networks = Networks::new_with_refreshed_list();
         let mut last_net_totals: HashMap<String, (u64, u64)> = networks
@@ -192,14 +187,13 @@ fn main() -> std::io::Result<()> {
         let mut last_tick = Instant::now();
 
         loop {
-            // Check if paused
+            //Check if paused
             let is_paused = if let Ok(state) = state_for_network.lock() {
                 state.paused
             } else {
                 false
             };
 
-            // Only refresh if not paused
             if !is_paused {
                 networks.refresh();
                 
@@ -208,7 +202,6 @@ fn main() -> std::io::Result<()> {
 
                 let mut net_rows: Vec<(String, String, String, String, String)> = Vec::new();
                 for (name, data) in networks.iter() {
-                    // Filter: exclude only specific virtual/loopback interfaces
                     let name_lower = name.to_lowercase();
                     let should_exclude = name_lower.contains("npcap")
                         || name_lower.contains("nocap")
@@ -244,7 +237,6 @@ fn main() -> std::io::Result<()> {
 
                 net_rows.sort_by(|a, b| b.0.cmp(&a.0));
 
-                // Update shared state
                 if let Ok(mut state) = state_for_network.lock() {
                     state.network_data = net_rows;
                 }
@@ -256,7 +248,7 @@ fn main() -> std::io::Result<()> {
         }
     });
 
-    // Main thread: UI and input handling
+    // Main thread
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -267,43 +259,40 @@ fn main() -> std::io::Result<()> {
     let mut command_mode = false;
     let mut command_output: Vec<String> = Vec::new();
 
-    // Store a local copy of system state for process detail lookups
+    //Store a local copy of system state for process detail lookups
     let mut local_sys = System::new_all();
     let mut last_sys_refresh = Instant::now();
     let mut last_ui_update = Instant::now();
 
-    // Initialize NVML for GPU monitoring (if enabled)
     #[cfg(feature = "gpu")]
-    let nvml = Nvml::init().ok(); // Handle initialization failure gracefully
+    let nvml = Nvml::init().ok();
 
     loop {
-        // Refresh local system occasionally for command lookups (every 2 seconds)
         if last_sys_refresh.elapsed() > Duration::from_secs(2) {
             local_sys.refresh_all();
             last_sys_refresh = Instant::now();
         }
 
-        // Only redraw if enough time has passed (throttle UI updates)
         let ui_update_interval = if command_mode {
-            Duration::from_millis(16) // Fast updates when typing
+            Duration::from_millis(16)
         } else {
-            Duration::from_millis(100) // Slower updates in normal mode
+            Duration::from_millis(100) 
         };
 
         let should_update_ui = last_ui_update.elapsed() >= ui_update_interval;
         
         // Handle input with timeout
+
+
         let poll_timeout = Duration::from_millis(50);
         
         if event::poll(poll_timeout)? {
             if let Event::Key(key) = event::read()? {
-                // Only process key press events, not release or repeat
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
                 
                 if command_mode {
-                    // Command mode input handling
                     match key.code {
                         KeyCode::Char(c) => {
                             command_input.push(c);
@@ -312,16 +301,13 @@ fn main() -> std::io::Result<()> {
                             command_input.pop();
                         }
                         KeyCode::Enter => {
-                            // Process the command
                             let cmd = command_input.trim().to_string();
                             command_output.clear();
                             
                             if cmd.starts_with("p ") || cmd.starts_with("P ") {
-                                // Parse PID and show process details
                                 let pid_str = cmd[2..].trim();
                                 if let Ok(pid_num) = pid_str.parse::<usize>() {
                                     let pid = Pid::from(pid_num);
-                                    // Refresh local system to get latest process info
                                     local_sys.refresh_all();
                                     if let Some(proc) = local_sys.process(pid) {
                                         command_output.push(format!("Process Details for PID {}:", pid_num));
@@ -376,7 +362,6 @@ fn main() -> std::io::Result<()> {
                         KeyCode::Char('m') => sort_by = SortBy::Memory,
                         KeyCode::Char('p') => sort_by = SortBy::Pid,
                         KeyCode::Char(' ') | KeyCode::Char('s') => {
-                            // Toggle pause with spacebar or 's'
                             if let Ok(mut state) = shared_state.lock() {
                                 state.paused = !state.paused;
                             }
@@ -384,23 +369,19 @@ fn main() -> std::io::Result<()> {
                         _ => {}
                     }
                 }
-                // Force UI update after input
                 last_ui_update = Instant::now().checked_sub(ui_update_interval).unwrap_or(Instant::now());
             }
         }
 
-        // Skip rendering if not enough time has passed
         if !should_update_ui {
             continue;
         }
 
         last_ui_update = Instant::now();
 
-        // Draw UI
+        //Draw ui
         terminal.draw(|f| {
             let size = f.area();
-
-            // Get shared state
             let state = shared_state.lock().unwrap();
 
             let outer = Layout::default()
@@ -413,7 +394,7 @@ fn main() -> std::io::Result<()> {
                 ])
                 .split(size);
 
-            // System info panel
+            //System info
             let sort_label = match sort_by {
                 SortBy::Cpu => "CPU",
                 SortBy::Memory => "Memory",
@@ -447,8 +428,6 @@ fn main() -> std::io::Result<()> {
                     Style::default().fg(Color::Blue),
                 )),
             ];
-
-            // Add GPU information if NVML is enabled and initialized
             #[cfg(feature = "gpu")]
             if let Some(nvml) = &nvml {
                 if let Ok(device) = nvml.device_by_index(0) {
@@ -491,7 +470,7 @@ fn main() -> std::io::Result<()> {
                 outer[0],
             );
 
-            // Processes table
+            //Processes table
             let mut procs = state.processes.clone();
             
             match sort_by {
@@ -565,13 +544,13 @@ fn main() -> std::io::Result<()> {
 
             f.render_widget(table, outer[1]);
 
-            // Bottom stats: RAM | Network
+            // Bottom stats: RAM n Network
             let bottom = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(outer[2]);
 
-            // RAM panel
+            //RAM  panel
             let total_mem = state.total_memory;
             let used_mem = state.used_memory;
             let available_mem = state.available_memory;
@@ -610,7 +589,6 @@ fn main() -> std::io::Result<()> {
                 )),
             ];
 
-            // Add swap info if swap exists
             if total_swap > 0 {
                 ram_lines.push(Line::from(""));
                 ram_lines.push(Line::from(Span::styled(
@@ -635,7 +613,6 @@ fn main() -> std::io::Result<()> {
                 )));
             }
 
-            // Add disk I/O info
             ram_lines.push(Line::from(""));
             ram_lines.push(Line::from(Span::styled(
                 format!("Disk I/O: ↓{} ↑{}", 
@@ -651,7 +628,7 @@ fn main() -> std::io::Result<()> {
                 bottom[0],
             );
 
-            // Network panel
+            //Network panel
             let mut net_table_rows: Vec<Row> = Vec::new();
             for (name, rx_total, tx_total, rx_rate, tx_rate) in state.network_data.iter().take(6) {
                 net_table_rows.push(Row::new(vec![
@@ -700,7 +677,7 @@ fn main() -> std::io::Result<()> {
                 )),
             ];
             
-            // Show command output
+            //Show command output
             for output_line in command_output.iter().rev().take(5).rev() {
                 cmd_lines.push(Line::from(Span::styled(
                     output_line.clone(),
