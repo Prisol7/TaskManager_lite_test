@@ -112,21 +112,17 @@ fn main() -> std::io::Result<()> {
         let mut last_tick = Instant::now();
 
         loop {
-            //heck if paused
             let is_paused = if let Ok(state) = state_for_process.lock() {
                 state.paused
             } else {
                 false
             };
 
-            // Only refresh if not paused
             if !is_paused {
                 sys.refresh_all();
                 
                 let now = Instant::now();
                 let dt = now.duration_since(last_tick).as_secs_f64().max(1e-9);
-
-                // Compute disk I/O rates
                 let proc_read_total: u64 = sys
                     .processes()
                     .values()
