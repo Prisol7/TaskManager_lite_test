@@ -11,6 +11,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+<<<<<<< HEAD
 use sysinfo::{System, Networks, Pid};
 use std::{
     collections::HashMap,
@@ -18,6 +19,13 @@ use std::{
     time::{Duration, Instant},
     thread,
 };
+=======
+use sysinfo::{System, Process, ProcessesToUpdate};
+#[cfg(feature = "gpu")]
+use nvml_wrapper::Nvml;
+use std::time::Duration;
+use tokio::time::sleep;
+>>>>>>> af2962f30c1167ec1cf58b076636e39b17b933ca
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SortBy {
@@ -267,12 +275,26 @@ fn main() -> std::io::Result<()> {
     let mut command_mode = false;
     let mut command_output: Vec<String> = Vec::new();
 
+<<<<<<< HEAD
     // Store a local copy of system state for process detail lookups
     let mut local_sys = System::new_all();
     let mut last_sys_refresh = Instant::now();
     let mut last_ui_update = Instant::now();
+=======
+    let mut sys = System::new_all();
+    // Initial refresh to get system info
+    sys.refresh_all();
+
+    // Get CPU model (assume first CPU for model name, as it's typically the same for all cores)
+    let cpu_model = sys.cpus().first().map_or("Unknown".to_string(), |cpu| cpu.brand().to_string());
+>>>>>>> af2962f30c1167ec1cf58b076636e39b17b933ca
+
+    // Initialize NVML for GPU monitoring (if enabled)
+    #[cfg(feature = "gpu")]
+    let nvml = Nvml::init().ok(); // Handle initialization failure gracefully
 
     loop {
+<<<<<<< HEAD
         // Refresh local system occasionally for command lookups (every 2 seconds)
         if last_sys_refresh.elapsed() > Duration::from_secs(2) {
             local_sys.refresh_all();
@@ -391,11 +413,18 @@ fn main() -> std::io::Result<()> {
         }
 
         last_ui_update = Instant::now();
+=======
+        // Refresh system information
+        sys.refresh_all(); // Refreshes CPU, memory, and processes
+        sys.refresh_cpu_all(); // Specific refresh for CPU usage
+        sys.refresh_processes(ProcessesToUpdate::All);
+>>>>>>> af2962f30c1167ec1cf58b076636e39b17b933ca
 
         // Draw UI
         terminal.draw(|f| {
             let size = f.area();
 
+<<<<<<< HEAD
             // Get shared state
             let state = shared_state.lock().unwrap();
 
@@ -417,6 +446,15 @@ fn main() -> std::io::Result<()> {
             };
             let pause_status = if state.paused { " [PAUSED]" } else { "" };
             let system_text = vec![
+=======
+            // Layout: Vertical split for system info and process table
+            let chunks = Layout::default()
+                .constraints([Constraint::Length(6), Constraint::Min(0)]) // Increased height for more info
+                .split(size);
+
+            // System information (CPU model, usage, RAM, and GPU)
+            let mut system_text = vec![
+>>>>>>> af2962f30c1167ec1cf58b076636e39b17b933ca
                 Line::from(Span::styled(
                     format!("CPU Model: {}", state.cpu_model),
                     Style::default().fg(Color::Green),
@@ -433,7 +471,51 @@ fn main() -> std::io::Result<()> {
                     format!("Sort: {} | 'c'=CPU 'm'=Memory 'p'=PID | Space/s=Pause | ':'=Cmd", sort_label),
                     Style::default().fg(Color::Cyan),
                 )),
+                Line::from(Span::styled(
+                    format!(
+                        "RAM: {}/{} MB ({:.2}%)",
+                        sys.used_memory() / 1024, // Convert KB to MB
+                        sys.total_memory() / 1024,
+                        (sys.used_memory() as f64 / sys.total_memory() as f64) * 100.0
+                    ),
+                    Style::default().fg(Color::Blue),
+                )),
             ];
+
+            // Add GPU information if NVML is enabled and initialized
+            #[cfg(feature = "gpu")]
+            if let Some(nvml) = &nvml {
+                if let Ok(device) = nvml.device_by_index(0) {
+                    if let Ok(utilization) = device.utilization_rates() {
+                        system_text.push(Line::from(Span::styled(
+                            format!("GPU Utilization: {}%", utilization.gpu),
+                            Style::default().fg(Color::Magenta),
+                        )));
+                        if let Ok(memory) = device.memory_info() {
+                            system_text.push(Line::from(Span::styled(
+                                format!(
+                                    "GPU Memory: {}/{} MB ({:.2}%)",
+                                    memory.used / 1024 / 1024, // Convert bytes to MB
+                                    memory.total / 1024 / 1024,
+                                    (memory.used as f64 / memory.total as f64) * 100.0
+                                ),
+                                Style::default().fg(Color::Magenta),
+                            )));
+                        }
+                    }
+                } else {
+                    system_text.push(Line::from(Span::styled(
+                        "GPU: Not detected".to_string(),
+                        Style::default().fg(Color::Red),
+                    )));
+                }
+            }
+            #[cfg(not(feature = "gpu"))]
+            system_text.push(Line::from(Span::styled(
+                "GPU: Monitoring disabled".to_string(),
+                Style::default().fg(Color::Red),
+            )));
+
             let system_block = Block::default()
                 .title("System")
                 .borders(Borders::ALL)
