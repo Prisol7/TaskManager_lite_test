@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-sysinfo = "0.31"
-tokio = { version = "1.40", features = ["rt-multi-thread", "time", "macros"] }
+sysinfo = { version = "0.30", features = ["multithread"] }
+tokio = { version = "1.41", features = ["full"] }
 ratatui = "0.28"
 crossterm = "0.28"
